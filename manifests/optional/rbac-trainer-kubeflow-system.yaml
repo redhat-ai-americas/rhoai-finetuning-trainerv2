@@ -1,0 +1,31 @@
+# Optional: suppresses a harmless Cell 5 warning about kubeflow-trainer-public.
+# Only applied when the kubeflow-system namespace exists (not present on all RHOAI 3.4 clusters).
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: banking-demo-trainer-public-reader
+  namespace: kubeflow-system
+  labels:
+    app.kubernetes.io/part-of: rhoai-banking-support-demo
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["kubeflow-trainer-public"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: banking-demo-trainer-public-reader
+  namespace: kubeflow-system
+  labels:
+    app.kubernetes.io/part-of: rhoai-banking-support-demo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: banking-demo-trainer-public-reader
+subjects:
+  - kind: ServiceAccount
+    name: workbench-sa-placeholder
+    namespace: osft-banking-support-demo

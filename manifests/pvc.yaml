@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shared-support-data
+  namespace: osft-banking-support-demo
+  labels:
+    app.kubernetes.io/part-of: rhoai-banking-support-demo
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 50Gi
+  # IMPORTANT: Replace with your cluster's RWX StorageClass before applying.
+  # On AWS with openshift-infra EFS setup, use: efs-csi
+  storageClassName: efs-csi

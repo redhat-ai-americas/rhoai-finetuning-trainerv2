@@ -1,0 +1,32 @@
+# Reference configuration for the Banking Support Agent demo.
+# Values here mirror .env.example for SSAs who prefer YAML over shell env vars.
+# The notebook discovers namespace and MLflow settings from the workbench at runtime.
+
+demo:
+  namespace: osft-banking-support-demo
+  pvc_name: shared-support-data
+  pvc_size: 50Gi
+  storage_class: efs-csi          # Set per cluster — see openshift-infra for RWX setup
+  service_account: osft-dist-banking-demo
+  workbench_service_account: osft-custom-image
+  pvc_mount_path: /opt/app-root/src/shared
+  cluster_mount_path: /mnt/shared
+
+training:
+  base_model: Qwen/Qwen2.5-1.5B-Instruct
+  runtime: training-hub
+  algorithm: OSFT
+  mlflow_experiment: banking77-routing-osft
+  mlflow_run_name: qwen-1.5b-run-01
+  nnodes: 2
+  nproc_per_node: 2
+  gpus_per_node: 2
+
+serving:
+  model_name: banking-routing-model
+  serving_runtime: vLLM ServingRuntime
+  checkpoint_subpath: support-checkpoints/hf_format/samples_*.0
+
+workbench:
+  image: quay.io/YOUR_ORG/banking-demo-base:latest
+  mlflow_annotation: opendatahub.io/mlflow-instance

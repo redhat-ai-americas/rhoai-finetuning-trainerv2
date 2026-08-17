@@ -1,0 +1,28 @@
+# Allows training worker pods to authenticate with the namespace-scoped MLflow instance.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mlflow-logger
+  namespace: osft-banking-support-demo
+  labels:
+    app.kubernetes.io/part-of: rhoai-banking-support-demo
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mlflow-logger-binding
+  namespace: osft-banking-support-demo
+  labels:
+    app.kubernetes.io/part-of: rhoai-banking-support-demo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: mlflow-logger
+subjects:
+  - kind: ServiceAccount
+    name: osft-dist-banking-demo
+    namespace: osft-banking-support-demo
