@@ -151,16 +151,18 @@ Execute cells in order. Expected runtime:
 | Data preparation | 1–3 | ~2 min |
 | Submit training | 4–6 | ~1 min |
 | Stream training logs | 7 | ~60–90 min |
-| Checkpoint + inference comparison | 8–9 | ~10 min |
-| vLLM config cleanup | 10 | ~1 min |
+| Locate checkpoint | 8 | ~1 min |
+| Log model to MLflow | 9 | ~5 min |
+| Inference comparison | 10 | ~10 min |
+| vLLM config cleanup | 11 | ~1 min |
 | Deploy model (UI) | markdown cell | ~5–10 min |
-| Test vLLM endpoint | 11 | ~1 min |
+| Test vLLM endpoint | 12 | ~1 min |
 
 ---
 
 ## Deploy Model via RHOAI UI
 
-After training completes and Cell 10 sanitizes the tokenizer config:
+After training completes and Cell 11 sanitizes the tokenizer config:
 
 1. Go to your Data Science Project → **Models** → **Deploy model**.
 2. Select **Single-model serving** platform.
@@ -179,7 +181,7 @@ Example PVC-relative path:
 support-checkpoints/hf_format/samples_30009.0
 ```
 
-4. Wait for the green checkmark, then run Cell 11.
+4. Wait for the green checkmark, then run Cell 12.
 
 The endpoint URL is derived automatically:
 
