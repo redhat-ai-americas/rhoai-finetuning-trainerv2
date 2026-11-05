@@ -1,5 +1,5 @@
 # Optional: suppresses a harmless Cell 5 warning about kubeflow-trainer-public.
-# Only applied when the kubeflow-system namespace exists (not present on all RHOAI 3.4 clusters).
+# Only applied when the kubeflow-system namespace exists (not present on all RHOAI 3.5 clusters).
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

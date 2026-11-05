@@ -26,8 +26,9 @@ subjects:
   - kind: ServiceAccount
     name: osft-dist-banking-demo
     namespace: osft-banking-support-demo
-kind: RoleBinding
+---
 apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
 metadata:
   name: osft-dist-banking-demo-mlflow-binding
   namespace: osft-banking-support-demo

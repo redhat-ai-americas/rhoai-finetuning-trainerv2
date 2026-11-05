@@ -1,6 +1,6 @@
 # RHOAI Banking Support Agent Demo
 
-Enterprise demo for Red Hat Solutions Architects showcasing **Intelligent Customer Support Routing** on Red Hat OpenShift AI (RHOAI) 3.4.
+Enterprise demo for Red Hat Solutions Architects showcasing **Intelligent Customer Support Routing** on Red Hat OpenShift AI (RHOAI) 3.5.
 
 A base LLM hallucinates conversational filler when asked to route banking complaints. By fine-tuning with **Orthogonal Subspace Fine-Tuning (OSFT)** via Kubeflow Trainer v2, the model learns to output strict JSON routing decisions mapped to 77 banking intents from the [PolyAI Banking77](https://github.com/PolyAI-LDN/task-specific-datasets) dataset.
 
@@ -14,7 +14,7 @@ A base LLM hallucinates conversational filler when asked to route banking compla
 ┌─────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
 │  Jupyter         │     │  Kubeflow Trainer v2  │     │  MLflow         │
 │  Workbench       │────▶│  (training-hub OSFT)  │────▶│  (metrics)      │
-│  (this notebook) │     │  2 nodes × 2 GPUs     │     │                 │
+│  (this notebook) │     │  2 nodes × 1 GPU      │     │                 │
 └────────┬────────┘     └──────────┬───────────┘     └─────────────────┘
          │                         │
          │              ┌──────────▼───────────┐
@@ -32,7 +32,7 @@ A base LLM hallucinates conversational filler when asked to route banking compla
 
 ## Prerequisites
 
-This repo assumes you already have a working OpenShift cluster with RHOAI 3.4. **Do not use this repo to install OpenShift or RHOAI** — use the guides below first.
+This repo assumes you already have a working OpenShift cluster with RHOAI 3.5. **Do not use this repo to install OpenShift or RHOAI** — use the 3.5 guides below first. MaaS, the observability dashboard, MLflow, and an RWX volume are not enough to submit a Trainer v2 job.
 
 ### 1. OpenShift cluster
 
@@ -41,40 +41,41 @@ This repo assumes you already have a working OpenShift cluster with RHOAI 3.4. *
 
 ### 2. GPU nodes and RWX storage
 
-Follow the [openshift-infra](https://github.com/dandawg/openshift-infra) repository:
-
-| Step | Command / Action |
-|------|------------------|
-| Bootstrap GitOps | `./bootstrap.sh` |
-| Deploy GPU nodes | `openshift-infra-machineset-aws --instance-type g6.2xlarge` |
-| Deploy RWX storage | `openshift-infra-efs-aws` (creates `efs-csi` StorageClass on AWS) |
-
-**Minimum hardware for this demo:**
+This demo is sized for two `g6e.2xlarge` workers (1x NVIDIA L40S, 8 vCPU, 64 GiB each). The SNO control plane is not a training node.
 
 | Resource | Requirement |
 |----------|-------------|
-| Training | 2 GPU nodes, 2 GPUs per node (`nnodes=2`, `nproc_per_node=2`) |
-| Workbench inference cell | 1 GPU on the workbench pod |
-| Storage | RWX PVC, 50 Gi recommended (`shared-support-data`) |
+| Training | 2 Ready workers, 1 GPU each (`nnodes=2`, `nproc_per_node=1`, 4 CPU, 32 Gi memory) |
+| Workbench during training | CPU hardware profile, so both GPUs stay free for the TrainJob |
+| Comparison cell | Restart the workbench on a 1-GPU hardware profile after the TrainJob pods exit |
+| vLLM | 1-GPU hardware profile on the other L40S |
+| Storage | RWX StorageClass and a 50 Gi PVC (`shared-support-data`) |
 
-### 3. RHOAI 3.4 platform
+On AWS, an EFS-backed StorageClass (often named `efs-csi`) is a typical RWX choice. Set `STORAGE_CLASS` in `.env` to the class that already exists on your cluster before `scripts/setup.sh`.
 
-Follow [rhoai-maas-guide](https://github.com/rh-aiservices-bu/rhoai-maas-guide) **Phases 1–4** to install and configure RHOAI:
+### 3. RHOAI 3.5 distributed training
 
-- Operator subscriptions (RHOAI, cert-manager, LWS)
-- DataScienceCluster and DSCInitialization
-- Dashboard settings
+Install the distributed-workload operators and DataScienceCluster settings from [Install the distributed workloads components](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/3.5/html/installing_and_uninstalling_openshift_ai_self-managed/installing-the-distributed-workloads-components_install):
 
-> **Note:** You do not need MaaS Phases 5–7 for this demo. Model serving is done directly via the RHOAI Single-model serving UI (KServe + vLLM), not through the MaaS API gateway.
+- NVIDIA GPU Operator, so each worker advertises `nvidia.com/gpu: 1`
+- JobSet Operator from OperatorHub (a TrainJob creates JobSets)
+- Red Hat build of Kueue Operator
+- DataScienceCluster: `kueue` = `Unmanaged`, `trainingoperator` = `Managed`, and `workbenches`, `kserve`, and `mlflow` = `Managed`
+- A CPU hardware profile and a 1-GPU hardware profile in the dashboard
+- `training-hub` ClusterTrainingRuntime (`oc get clustertrainingruntime`)
 
-### 4. RHOAI components required
+If the demo namespace is labeled `kueue.openshift.io/managed=true`, it needs a LocalQueue whose ClusterQueue can admit `nvidia.com/gpu: 2` at the same time. Otherwise the TrainJob stays suspended.
 
-Confirm these are enabled in your DataScienceCluster:
+Model serving for this demo is the single-model serving UI (KServe + vLLM), not the MaaS API gateway.
 
-- [x] **Training Operator** with `training-hub` runtime (v0.5.0)
-- [x] **MLflow** tracking server
-- [x] **Model serving** (KServe) with vLLM ServingRuntime available
-- [x] **Workbench** with GPU quota in your namespace
+### 4. Check the cluster before creating a workbench
+
+```bash
+chmod +x scripts/verify-cluster.sh scripts/setup.sh scripts/teardown.sh
+./scripts/verify-cluster.sh
+```
+
+Fix every failed check before continuing. The script only reads cluster state.
 
 ---
 
@@ -92,7 +93,7 @@ Edit `.env` for your cluster:
 
 ```bash
 DEMO_NAMESPACE=osft-banking-support-demo   # Must match your Data Science Project namespace
-STORAGE_CLASS=efs-csi                      # Your RWX StorageClass name
+STORAGE_CLASS=efs-csi                      # RWX StorageClass that already exists on this cluster
 CUSTOM_IMAGE=quay.io/YOUR_ORG/banking-demo-base:latest
 VLLM_MODEL_NAME=banking-routing-model
 ```
@@ -100,7 +101,8 @@ VLLM_MODEL_NAME=banking-routing-model
 ### Step 2: Deploy demo infrastructure
 
 ```bash
-chmod +x scripts/setup.sh scripts/teardown.sh
+chmod +x scripts/verify-cluster.sh scripts/setup.sh scripts/teardown.sh
+./scripts/verify-cluster.sh
 ./scripts/setup.sh
 ```
 
@@ -117,7 +119,7 @@ The custom image pre-installs all Python dependencies so live demos do not requi
 ```bash
 cd container
 
-# Build (requires access to registry.redhat.io/rhoai and the RHOAI PyPI index)
+# Build (requires access to registry.redhat.io/rhoai and the RHOAI 3.5 Python index)
 podman build -t quay.io/YOUR_ORG/banking-demo-base:latest .
 
 # Push to your registry
@@ -132,12 +134,16 @@ On OpenShift, you can also build via a `BuildConfig` or connect the image to you
 1. In the RHOAI Dashboard, create a **Data Science Project** linked to namespace `osft-banking-support-demo`.
 2. Create a **Workbench** with these settings:
 
+Create the workbench on a **CPU hardware profile** first. A GPU on the workbench would take one of the two L40S devices and leave the TrainJob pending.
+
 | Setting | Value |
 |---------|-------|
 | Image | `quay.io/YOUR_ORG/banking-demo-base:latest` (custom image) |
-| GPU | Assign a GPU hardware profile |
+| Hardware profile | CPU while you submit and stream the TrainJob |
 | Storage | Mount PVC `shared-support-data` at `/opt/app-root/src/shared` |
-| Environment variable | Add `opendatahub.io/mlflow-instance` annotation (via workbench settings / YAML) so MLflow env vars are injected |
+| Annotation | `opendatahub.io/mlflow-instance` (via workbench settings / YAML) so MLflow env vars are injected |
+
+After Cell 7 finishes and the TrainJob pods are gone, stop the workbench and start it again on a **1-GPU hardware profile**, then run Cell 10. Cell 12 does not need a GPU on the workbench.
 
 3. Clone or upload this repository into the workbench.
 4. Open `notebooks/osft-banking-demo.ipynb`.
@@ -150,7 +156,7 @@ Execute cells in order. Expected runtime:
 |-------|-------|------|
 | Data preparation | 1–3 | ~2 min |
 | Submit training | 4–6 | ~1 min |
-| Stream training logs | 7 | ~60–90 min |
+| Stream training logs | 7 | ~45–90 min |
 | Locate checkpoint | 8 | ~1 min |
 | Log model to MLflow | 9 | ~5 min |
 | Inference comparison | 10 | ~10 min |
@@ -170,10 +176,11 @@ After training completes and Cell 11 sanitizes the tokenizer config:
 
 | Field | Value |
 |-------|-------|
-| Model name | `banking-routing-model` |
-| Serving runtime | `vLLM ServingRuntime` |
-| Model framework | `vLLM` |
+| Model deployment name | `banking-routing-model` |
+| Hardware profile | 1 GPU (the L40S the workbench is not using) |
+| Serving runtime | `vLLM NVIDIA GPU ServingRuntime for KServe` |
 | Model location | Existing data connection → PVC path from Cell 8 output |
+| Token authentication | Off, so Cell 12 can call the in-cluster predictor without a token |
 
 Example PVC-relative path:
 
@@ -215,6 +222,8 @@ http://banking-routing-model-predictor.<namespace>.svc.cluster.local/v1
 | `CUSTOM_IMAGE` | — | Custom workbench image URI |
 | `K8S_VERIFY_SSL` | `true` | Set `false` only for sandbox clusters with self-signed certs |
 
+Training shape (notebook Cells 4 and 6, also `config/demo-config.yaml`): 2 nodes, 1 process and 1 GPU per node, 4 CPU, 32 Gi memory, 3 epochs, full Banking77 training split. That fits two `g6e.2xlarge` workers. If a training pod is OOMKilled, lower `max_tokens_per_gpu` from `64000` to `32768`. Set `HF_TOKEN` as a workbench environment variable so the training pods can download the base model.
+
 See also `config/demo-config.yaml` for a YAML reference of all settings.
 
 ---
@@ -223,11 +232,11 @@ See also `config/demo-config.yaml` for a YAML reference of all settings.
 
 ### `'training-hub' runtime not found`
 
-Ensure the RHOAI Training Operator is installed and the `training-hub` ClusterTrainingRuntime (v0.5.0) is available. Check **Administration → Training Runtimes** in the RHOAI dashboard.
+Ensure the RHOAI Training Operator is `Managed` and the `training-hub` ClusterTrainingRuntime is available. Check `oc get clustertrainingruntime` or **Administration → Training Runtimes** in the RHOAI dashboard. Run `./scripts/verify-cluster.sh`.
 
 ### MLflow URI not found in Cell 2
 
-Add the `opendatahub.io/mlflow-instance` annotation to your workbench. See [RHOAI MLflow documentation](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/3.4/html/monitoring_and_tracing_models/index).
+Add the `opendatahub.io/mlflow-instance` annotation to your workbench. See [RHOAI 3.5 MLflow documentation](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/3.5/html/monitoring_and_tracing_models/index).
 
 ### Training job fails with RBAC errors
 
@@ -239,7 +248,7 @@ Run Cell 10 before deploying. OSFT occasionally writes a `quantization_config` b
 
 ### PVC stays Pending
 
-Verify your cluster has a **ReadWriteMany** StorageClass. On AWS, deploy EFS via [openshift-infra](https://github.com/dandawg/openshift-infra). Update `STORAGE_CLASS` in `.env` before running `setup.sh`.
+Verify your cluster has a **ReadWriteMany** StorageClass (`oc get storageclass`). Set `STORAGE_CLASS` in `.env` to that class before running `setup.sh`.
 
 ### Cell 5 fails with `403 Forbidden` on `trainingruntimes` or `kubeflow-trainer-public`
 
@@ -260,7 +269,11 @@ oc get pod -n osft-baning-support-demo -l opendatahub.io/dashboard=true \
 
 ### Harmless Cell 5 warning about `kubeflow-trainer-public`
 
-On RHOAI 3.4, the `kubeflow-system` namespace often does not exist. You may see a warning when connecting to the Trainer client — this is **cosmetic only** and does not affect training. No action required.
+On RHOAI 3.5, the `kubeflow-system` namespace often does not exist. You may see a warning when connecting to the Trainer client — this is **cosmetic only** and does not affect training. No action required.
+
+### TrainJob stays suspended or pending
+
+Run `./scripts/verify-cluster.sh`. A suspended job usually means the namespace is Kueue-managed and the LocalQueue cannot admit 2 GPUs at once. A pending pod usually means a node cannot fit `nvidia.com/gpu: 1`, `cpu: 4`, and `memory: 32Gi` together, or the workbench is still holding a GPU.
 
 ### PVC error during `setup.sh` on an existing cluster
 
@@ -307,8 +320,12 @@ rhoai-finetuning-trainerv2/
 │   ├── namespace.yaml
 │   ├── serviceaccount.yaml
 │   ├── rbac-mlflow.yaml
-│   └── pvc.yaml
+│   ├── rbac-trainer-workbench.yaml
+│   ├── pvc.yaml
+│   └── optional/
+│       └── rbac-trainer-kubeflow-system.yaml
 └── scripts/
+    ├── verify-cluster.sh         # Read-only 3.5 prerequisite checks
     ├── setup.sh
     └── teardown.sh
 ```
@@ -317,8 +334,8 @@ rhoai-finetuning-trainerv2/
 
 ## Related Resources
 
-- [RHOAI 3.4 Documentation](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/3.4)
-- [rhoai-maas-guide](https://github.com/rh-aiservices-bu/rhoai-maas-guide) — RHOAI platform setup
-- [openshift-infra](https://github.com/dandawg/openshift-infra) — GPU nodes and RWX storage
+- [RHOAI 3.5 Documentation](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/3.5)
+- [Install the distributed workloads components](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/3.5/html/installing_and_uninstalling_openshift_ai_self-managed/installing-the-distributed-workloads-components_install)
+- [Run Kubeflow Trainer v2 workloads](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/3.5/html/working_with_distributed_workloads/running-kubeflow-trainerv2_distributed-workloads)
 - [PolyAI Banking77 Dataset](https://github.com/PolyAI-LDN/task-specific-datasets)
 - [Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct) — Base model

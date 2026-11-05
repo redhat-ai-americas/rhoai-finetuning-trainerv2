@@ -6,7 +6,7 @@ demo:
   namespace: osft-banking-support-demo
   pvc_name: shared-support-data
   pvc_size: 50Gi
-  storage_class: efs-csi          # Set per cluster — see openshift-infra for RWX setup
+  storage_class: efs-csi          # Set to the RWX StorageClass on this cluster
   service_account: osft-dist-banking-demo
   workbench_service_account: osft-custom-image
   pvc_mount_path: /opt/app-root/src/shared
@@ -18,13 +18,16 @@ training:
   algorithm: OSFT
   mlflow_experiment: banking77-routing-osft
   mlflow_run_name: qwen-1.5b-run-01
+  num_epochs: 3
   nnodes: 2
-  nproc_per_node: 2
-  gpus_per_node: 2
+  nproc_per_node: 1
+  gpus_per_node: 1
+  cpu_per_node: 4
+  memory_per_node: 32Gi
 
 serving:
   model_name: banking-routing-model
-  serving_runtime: vLLM ServingRuntime
+  serving_runtime: vLLM NVIDIA GPU ServingRuntime for KServe
   checkpoint_subpath: support-checkpoints/hf_format/samples_*.0
 
 workbench:
