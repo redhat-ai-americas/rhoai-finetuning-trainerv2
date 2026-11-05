@@ -51,7 +51,17 @@ This demo is sized for two `g6e.2xlarge` workers (1x NVIDIA L40S, 8 vCPU, 64 GiB
 | vLLM | 1-GPU hardware profile on the other L40S |
 | Storage | RWX StorageClass and a 50 Gi PVC (`shared-support-data`) |
 
-On AWS, an EFS-backed StorageClass (often named `efs-csi`) is a typical RWX choice. Set `STORAGE_CLASS` in `.env` to the class that already exists on your cluster before `scripts/setup.sh`.
+This demo uses the AWS EFS StorageClass `efs-csi`. That class was created from [openshift-infra](https://github.com/dandawg/openshift-infra/tree/main), which deploys ReadWriteMany storage on an AWS-backed OpenShift cluster:
+
+```bash
+git clone https://github.com/dandawg/openshift-infra.git
+cd openshift-infra
+./bootstrap.sh
+uv sync && source .venv/bin/activate
+openshift-infra-efs-aws
+```
+
+`openshift-infra-efs-aws` installs the EFS CSI driver and creates the `efs-csi` StorageClass. Details are in [infra/efs/aws](https://github.com/dandawg/openshift-infra/tree/main/infra/efs/aws). Set `STORAGE_CLASS` in `.env` to that class before `scripts/setup.sh`. The same repository can add GPU MachineSets (`openshift-infra-machineset-aws --instance-type g6e.2xlarge`).
 
 ### 3. RHOAI 3.5 distributed training
 
@@ -60,7 +70,7 @@ Install the distributed-workload operators and DataScienceCluster settings from 
 - NVIDIA GPU Operator, so each worker advertises `nvidia.com/gpu: 1`
 - JobSet Operator from OperatorHub (a TrainJob creates JobSets)
 - Red Hat build of Kueue Operator
-- DataScienceCluster: `kueue` = `Unmanaged`, `trainingoperator` = `Managed`, and `workbenches`, `kserve`, and `mlflow` = `Managed`
+- DataScienceCluster: `kueue` = `Unmanaged`, `trainer` = `Managed`, `trainingoperator` = `Managed`, and `workbenches`, `kserve`, and `mlflowoperator` = `Managed`
 - A CPU hardware profile and a 1-GPU hardware profile in the dashboard
 - `training-hub` ClusterTrainingRuntime (`oc get clustertrainingruntime`)
 
@@ -93,8 +103,7 @@ Edit `.env` for your cluster:
 
 ```bash
 DEMO_NAMESPACE=osft-banking-support-demo   # Must match your Data Science Project namespace
-STORAGE_CLASS=efs-csi                      # RWX StorageClass that already exists on this cluster
-CUSTOM_IMAGE=quay.io/YOUR_ORG/banking-demo-base:latest
+STORAGE_CLASS=efs-csi                      # RWX class from openshift-infra-efs-aws
 VLLM_MODEL_NAME=banking-routing-model
 ```
 
@@ -112,63 +121,62 @@ This creates:
 - ServiceAccount `osft-dist-banking-demo` with MLflow RBAC
 - RWX PVC `shared-support-data`
 
-### Step 3: Build the custom workbench image
-
-The custom image pre-installs all Python dependencies so live demos do not require `pip install` waits.
-
-```bash
-cd container
-
-# Build (requires access to registry.redhat.io/rhoai and the RHOAI 3.5 Python index)
-podman build -t quay.io/YOUR_ORG/banking-demo-base:latest .
-
-# Push to your registry
-podman login quay.io
-podman push quay.io/YOUR_ORG/banking-demo-base:latest
-```
-
-On OpenShift, you can also build via a `BuildConfig` or connect the image to your namespace's image pull secrets.
-
-### Step 4: Create the RHOAI Data Science Project and workbench
+### Step 3: Create the workbench
 
 1. In the RHOAI Dashboard, create a **Data Science Project** linked to namespace `osft-banking-support-demo`.
-2. Create a **Workbench** with these settings:
-
-Create the workbench on a **CPU hardware profile** first. A GPU on the workbench would take one of the two L40S devices and leave the TrainJob pending.
+2. Create a **Workbench** on a **CPU hardware profile**. A GPU on the workbench would take one of the two L40S devices and leave the TrainJob pending.
 
 | Setting | Value |
 |---------|-------|
-| Image | `quay.io/YOUR_ORG/banking-demo-base:latest` (custom image) |
+| Image | **Training \| Jupyter \| PyTorch \| CUDA \| Python** (the default 3.5 image) |
 | Hardware profile | CPU while you submit and stream the TrainJob |
-| Storage | Mount PVC `shared-support-data` at `/opt/app-root/src/shared` |
-| Annotation | `opendatahub.io/mlflow-instance` (via workbench settings / YAML) so MLflow env vars are injected |
-
-After Cell 7 finishes and the TrainJob pods are gone, stop the workbench and start it again on a **1-GPU hardware profile**, then run Cell 10. Cell 12 does not need a GPU on the workbench.
+| Workbench home | Default storage class, ReadWriteOnce, 20 Gi |
+| Shared data | Mount PVC `shared-support-data` at `/opt/app-root/src/shared` |
+| Annotation | `opendatahub.io/mlflow-instance` so MLflow env vars are injected |
 
 3. Clone or upload this repository into the workbench.
 4. Open `notebooks/osft-banking-demo.ipynb`.
 
-### Step 5: Run the demo notebook
+The default image does not include the Kubeflow SDK. Cell 5 installs it from the OpenShift AI 3.5 Python index. Run that cell once, restart the kernel, then continue from Cell 1.
+
+After Cell 8 finishes and the TrainJob pods are gone, stop the workbench and start it again on a **1-GPU hardware profile**, then run Cell 11. Cell 13 does not need a GPU on the workbench.
+
+### Optional: custom workbench image
+
+`container/Dockerfile` bakes that same `pip install` into the default PyTorch image so a live demo can skip Cell 5. Build it only if you want that shortcut:
+
+```bash
+cd container
+podman build -t quay.io/YOUR_ORG/banking-demo-base:latest .
+podman login quay.io
+podman push quay.io/YOUR_ORG/banking-demo-base:latest
+```
+
+Select that image in the workbench form instead of the default PyTorch image, and skip Cell 5.
+
+### Step 4: Run the demo notebook
 
 Execute cells in order. Expected runtime:
 
 | Phase | Cells | Time |
 |-------|-------|------|
 | Data preparation | 1–3 | ~2 min |
-| Submit training | 4–6 | ~1 min |
-| Stream training logs | 7 | ~45–90 min |
-| Locate checkpoint | 8 | ~1 min |
-| Log model to MLflow | 9 | ~5 min |
-| Inference comparison | 10 | ~10 min |
-| vLLM config cleanup | 11 | ~1 min |
+| Hyperparameters | 4 | ~1 min |
+| Install Kubeflow SDK | 5 | ~1 min |
+| Submit training | 6–7 | ~1 min |
+| Stream training logs | 8 | ~45–90 min |
+| Locate checkpoint | 9 | ~1 min |
+| Log model to MLflow | 10 | ~5 min |
+| Inference comparison | 11 | ~10 min |
+| vLLM config cleanup | 12 | ~1 min |
 | Deploy model (UI) | markdown cell | ~5–10 min |
-| Test vLLM endpoint | 12 | ~1 min |
+| Test vLLM endpoint | 13 | ~1 min |
 
 ---
 
 ## Deploy Model via RHOAI UI
 
-After training completes and Cell 11 sanitizes the tokenizer config:
+After training completes and Cell 12 sanitizes the tokenizer config:
 
 1. Go to your Data Science Project → **Models** → **Deploy model**.
 2. Select **Single-model serving** platform.
@@ -179,8 +187,8 @@ After training completes and Cell 11 sanitizes the tokenizer config:
 | Model deployment name | `banking-routing-model` |
 | Hardware profile | 1 GPU (the L40S the workbench is not using) |
 | Serving runtime | `vLLM NVIDIA GPU ServingRuntime for KServe` |
-| Model location | Existing data connection → PVC path from Cell 8 output |
-| Token authentication | Off, so Cell 12 can call the in-cluster predictor without a token |
+| Model location | Existing data connection → PVC path from Cell 9 output |
+| Token authentication | Off, so Cell 13 can call the in-cluster predictor without a token |
 
 Example PVC-relative path:
 
@@ -188,7 +196,7 @@ Example PVC-relative path:
 support-checkpoints/hf_format/samples_30009.0
 ```
 
-4. Wait for the green checkmark, then run Cell 12.
+4. Wait for the green checkmark, then run Cell 13.
 
 The endpoint URL is derived automatically:
 
@@ -203,10 +211,10 @@ http://banking-routing-model-predictor.<namespace>.svc.cluster.local/v1
 | Cell | Talking Point |
 |------|---------------|
 | 3 | "We start with 10,000 real banking complaints across 77 intent categories." |
-| 6–7 | "RHOAI distributes OSFT training across multiple GPUs, logging metrics to MLflow." |
-| 9 | "Watch the base model hallucinate JSON format — wrong keys, wrong types. The fine-tuned model outputs strict routing JSON." |
+| 7–8 | "RHOAI distributes OSFT training across multiple GPUs, logging metrics to MLflow." |
+| 11 | "Watch the base model hallucinate JSON format — wrong keys, wrong types. The fine-tuned model outputs strict routing JSON." |
 | UI deploy | "We serve the fine-tuned weights directly from shared storage via vLLM — no export step." |
-| 11 | "Production-grade inference: same JSON schema, sub-second latency, API-ready." |
+| 13 | "Production-grade inference: same JSON schema, sub-second latency, API-ready." |
 
 ---
 
@@ -219,10 +227,10 @@ http://banking-routing-model-predictor.<namespace>.svc.cluster.local/v1
 | `DEMO_PVC_NAME` | `shared-support-data` | Shared PVC name |
 | `DEMO_SA_NAME` | `osft-dist-banking-demo` | Training worker ServiceAccount |
 | `VLLM_MODEL_NAME` | `banking-routing-model` | Model name in RHOAI UI and inference cell |
-| `CUSTOM_IMAGE` | — | Custom workbench image URI |
+| `CUSTOM_IMAGE` | — | Optional. Only used if you build `container/Dockerfile` and skip Cell 5 |
 | `K8S_VERIFY_SSL` | `true` | Set `false` only for sandbox clusters with self-signed certs |
 
-Training shape (notebook Cells 4 and 6, also `config/demo-config.yaml`): 2 nodes, 1 process and 1 GPU per node, 4 CPU, 32 Gi memory, 3 epochs, full Banking77 training split. That fits two `g6e.2xlarge` workers. If a training pod is OOMKilled, lower `max_tokens_per_gpu` from `64000` to `32768`. Set `HF_TOKEN` as a workbench environment variable so the training pods can download the base model.
+Training shape (notebook Cells 4 and 7, also `config/demo-config.yaml`): 2 nodes, 1 process and 1 GPU per node, 4 CPU, 32 Gi memory, 3 epochs, full Banking77 training split. That fits two `g6e.2xlarge` workers. If a training pod is OOMKilled, lower `max_tokens_per_gpu` from `64000` to `32768`. Set `HF_TOKEN` as a workbench environment variable so the training pods can download the base model.
 
 See also `config/demo-config.yaml` for a YAML reference of all settings.
 
@@ -244,13 +252,13 @@ Confirm `scripts/setup.sh` was run and training workers use ServiceAccount `osft
 
 ### vLLM deployment fails after training
 
-Run Cell 10 before deploying. OSFT occasionally writes a `quantization_config` block that vLLM rejects.
+Run Cell 12 before deploying. OSFT occasionally writes a `quantization_config` block that vLLM rejects.
 
 ### PVC stays Pending
 
 Verify your cluster has a **ReadWriteMany** StorageClass (`oc get storageclass`). Set `STORAGE_CLASS` in `.env` to that class before running `setup.sh`.
 
-### Cell 5 fails with `403 Forbidden` on `trainingruntimes` or `kubeflow-trainer-public`
+### Cell 6 fails with `403 Forbidden` on `trainingruntimes` or `kubeflow-trainer-public`
 
 The Jupyter workbench ServiceAccount needs RBAC to talk to Kubeflow Trainer v2. This is **not** an `.env` misconfiguration — it means `DEMO_WORKBENCH_SA` in `.env` does not match your workbench pod's SA, or `setup.sh` has not been run since adding the trainer RBAC manifests.
 
@@ -265,9 +273,9 @@ oc get pod -n osft-baning-support-demo -l opendatahub.io/dashboard=true \
 
 3. **Restart the workbench** (stop/start in RHOAI UI) so the pod picks up new RoleBindings
 
-4. Re-run Cell 5
+4. Re-run Cell 6
 
-### Harmless Cell 5 warning about `kubeflow-trainer-public`
+### Harmless Cell 6 warning about `kubeflow-trainer-public`
 
 On RHOAI 3.5, the `kubeflow-system` namespace often does not exist. You may see a warning when connecting to the Trainer client — this is **cosmetic only** and does not affect training. No action required.
 
@@ -312,7 +320,7 @@ rhoai-finetuning-trainerv2/
 ├── config/
 │   └── demo-config.yaml
 ├── container/
-│   └── Dockerfile              # Custom workbench image
+│   └── Dockerfile              # Optional image that skips the Cell 5 pip install
 ├── notebooks/
 │   └── osft-banking-demo.ipynb # Main demo workflow
 ├── manifests/
@@ -339,3 +347,4 @@ rhoai-finetuning-trainerv2/
 - [Run Kubeflow Trainer v2 workloads](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/3.5/html/working_with_distributed_workloads/running-kubeflow-trainerv2_distributed-workloads)
 - [PolyAI Banking77 Dataset](https://github.com/PolyAI-LDN/task-specific-datasets)
 - [Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct) — Base model
+- [openshift-infra](https://github.com/dandawg/openshift-infra/tree/main) — AWS EFS RWX storage (`efs-csi`) used by this demo

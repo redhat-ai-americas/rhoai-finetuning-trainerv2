@@ -31,5 +31,6 @@ serving:
   checkpoint_subpath: support-checkpoints/hf_format/samples_*.0
 
 workbench:
-  image: quay.io/YOUR_ORG/banking-demo-base:latest
+  # Default dashboard image. container/Dockerfile is an optional shortcut that skips Cell 5.
+  image: Training | Jupyter | PyTorch | CUDA | Python
   mlflow_annotation: opendatahub.io/mlflow-instance

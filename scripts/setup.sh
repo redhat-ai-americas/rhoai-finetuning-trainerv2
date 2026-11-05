@@ -66,7 +66,7 @@ if "${KUBECTL}" get namespace kubeflow-system &>/dev/null; then
   fi
 else
   echo "==> kubeflow-system namespace not found — skipping optional trainer version RBAC."
-  echo "    (Harmless; Cell 5 may show a version info warning but training still works.)"
+  echo "    (Harmless; Cell 6 may show a version info warning but training still works.)"
 fi
 
 if "${KUBECTL}" get pvc "${DEMO_PVC_NAME}" -n "${DEMO_NAMESPACE}" &>/dev/null; then

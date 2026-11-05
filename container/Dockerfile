@@ -1,7 +1,6 @@
-# Custom workbench image for the RHOAI Banking Support Agent demo.
-# Build and push before creating your workbench — see README for instructions.
-# OSFT runs in the cluster training-hub runtime. This image only needs the
-# Kubeflow SDK (to submit TrainJobs) plus the notebook's data and inference libs.
+# Optional workbench image. The documented path uses the default PyTorch image
+# and Cell 5 of the notebook. Build this only to skip that pip install.
+# OSFT still runs in the cluster training-hub runtime.
 FROM registry.redhat.io/rhoai/odh-workbench-jupyter-pytorch-cuda-py312-rhel9:v3.5
 
 USER root
